@@ -21,7 +21,7 @@ the metro, how many sales are big enough, where are they, and what is around the
 - `stations.json`: stations with their current names.
 - `station_venues.json`: venues within 1 km of their nearest station.
 - `area_venues.json`: venues within 1.5 km of the centre of each area more than 2 km from a station.
-- `prep_area_metro.py`: script that derives `area_metro.json` from the course files.
+- `prep_derived_files.py`: script that derives the four JSON files above from the course files.
 
 ## Data and data quality
 - Sources: DLD transactions (10% sample), community boundaries, metro stations and
