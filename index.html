@@ -1,0 +1,1906 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Space, Budget and the Dubai Metro</title>
+<style>
+  body { font-family: Segoe UI, Helvetica, Arial, sans-serif; margin: 24px; color: #222; }
+  #wrap { max-width: 1250px; position: relative; }
+  .ctl { position: absolute; font: 14px Segoe UI, Helvetica, Arial, sans-serif; white-space: nowrap; display: flex; gap: 22px; align-items: center; }
+  .ctl .vega-bind { display: inline-flex; gap: 8px; align-items: center; }
+  .ctl label { display: inline-flex; gap: 8px; align-items: center; }
+  .vega-bindings { display: none; }
+  .vega-bindings { font: 14px Segoe UI, Helvetica, Arial, sans-serif; line-height: 1.9; }
+  .note { max-width: 950px; font-size: 14px; color: #444; line-height: 1.5; }
+  .note h3 { font-size: 15px; margin: 18px 0 4px; color: #222; }
+  .note p, .note ul { margin: 4px 0; }
+</style>
+<script src="https://cdn.jsdelivr.net/npm/vega@5.33.1"></script>
+<script src="https://cdn.jsdelivr.net/npm/vega-lite@5.23.0"></script>
+<script src="https://cdn.jsdelivr.net/npm/vega-embed@6.29.0"></script>
+</head>
+<body>
+<div id="wrap">
+  <div id="vis"></div>
+  <div class="ctl" id="ctl-size" style="left:0;top:0"></div>
+  <div class="ctl" id="ctl-venue" style="left:0;top:0"><span id="ctl-venue-slot"></span><span id="ctl-mapview"></span></div>
+  <div class="ctl" id="ctl-all" style="left:0;top:0"></div>
+</div>
+</div>
+<div class="note">
+  <h3>About the data</h3>
+  <p><b>Sources (course repository).</b> Dubai Land Department transactions (10% sample), community boundaries, metro-station file and Foursquare venues file.</p>
+  <p><b>Files derived from them</b> (hosted on GitHub):</p>
+  <ul>
+    <li><a href="https://raw.githubusercontent.com/taha24li/Duabi-Metro-stations---Part-3/refs/heads/main/area_metro.json">area_metro.json</a>: each area's nearest station and the straight-line distance from the area centre.</li>
+    <li><a href="https://raw.githubusercontent.com/taha24li/Duabi-Metro-stations---Part-3/refs/heads/main/stations.json">stations.json</a>: stations with their current names.</li>
+    <li><a href="https://raw.githubusercontent.com/taha24li/Duabi-Metro-stations---Part-3/refs/heads/main/station_venues.json">station_venues.json</a>: venues within 1 km of their nearest station, in six groups.</li>
+    <li><a href="https://raw.githubusercontent.com/taha24li/Duabi-Metro-stations---Part-3/refs/heads/main/area_venues.json">area_venues.json</a>: venues within 1.5 km of the centre of each area that is more than 2 km from a station.</li>
+  </ul>
+  <h3>Data quality</h3>
+  <ul>
+    <li><b>Sales kept:</b> existing 2-bedroom flats, January 2024 to August 2026, AED 1,000 to 100,000 per m², floor area 30 to 400 m². Sales with a zero or missing price, missing area coordinates or an implausible size are dropped.</li>
+    <li><b>Sample:</b> all counts come from the 10% sample and are not scaled up. Cells with fewer than 10 sales are greyed as small samples.</li>
+    <li><b>Distances</b> are straight lines from the area's centre point, so they are approximate.</li>
+    <li><b>Station names:</b> the 2020 name is from the course file; the current name is from the RTA rail map (25 Sep 2026).</li>
+    <li><b>Venues</b> are recorded circa 2020 and capped at 100 per community, so coverage is uneven.</li>
+  </ul>
+  <h3>Source code</h3>
+  <p>The whole visualization is one Vega-Lite specification, written in this page. Use the chart's "…" menu → View Source, or Open in Vega Editor. Stand-alone copy: <a href="vegalite_spec.json">vegalite_spec.json</a>.</p>
+</div>
+
+<script>
+// The Vega-Lite specification is written here in the page, so its source can be read directly.
+const spec = {
+  "$schema": "https://vega.github.io/schema/vega-lite/v5.json",
+  "description": "Select a budget and metro distance, then pick a DLD area to inspect its nearest station, nearby recorded venues and flat sizes. Heatmap clicks reset the map focus and navigation; the floor-area target applies to all three views.",
+  "title": {
+    "text": "Space, Budget and the Dubai Metro",
+    "subtitle": [
+      "Existing two-bedroom flat sales · January 2024 to August 2026 · DLD 10% sample",
+      "Each cell shows sales meeting the size target out of all sales within budget. Click to select."
+    ],
+    "anchor": "start"
+  },
+  "data": {
+    "url": "https://raw.githubusercontent.com/sharios/CS333/main/2026-27/Part%202/transactions.csv",
+    "format": {
+      "type": "csv",
+      "parse": {
+        "actual_worth": "number",
+        "procedure_area": "number",
+        "meter_sale_price": "number",
+        "area_lat": "number",
+        "area_lon": "number",
+        "area_id": "number",
+        "instance_date": "string"
+      }
+    }
+  },
+  "params": [
+    {
+      "name": "minSize",
+      "value": 100,
+      "bind": {
+        "input": "range",
+        "min": 60,
+        "max": 160,
+        "step": 5,
+        "name": "Minimum floor area (m²) "
+      }
+    },
+    {
+      "name": "allAreas",
+      "value": false,
+      "bind": {
+        "input": "checkbox",
+        "name": "Show every area "
+      }
+    },
+    {
+      "name": "venueCat",
+      "value": "All",
+      "bind": {
+        "input": "select",
+        "options": [
+          "All",
+          "Cafés and coffee",
+          "Restaurants",
+          "Hotels",
+          "Shops",
+          "Beach and leisure",
+          "Other"
+        ],
+        "name": "Venue category "
+      }
+    },
+    {
+      "name": "mapView",
+      "value": "Explore area",
+      "bind": {
+        "input": "select",
+        "options": [
+          "Explore area",
+          "Nearest station"
+        ],
+        "name": "Map view "
+      }
+    },
+    {
+      "name": "mapFactor",
+      "expr": "mapWindow.mapU ? clamp(pow(1 / max(0.000001, span(mapWindow.mapU)), 2.5), 1, 120) : 1"
+    },
+    {
+      "name": "mapScale",
+      "expr": "(((pickArea.area_lon && pickArea.band[0] === scenario.band[0] && pickArea.ceiling[0] === scenario.ceiling[0])) ? ((mapView === 'Nearest station' && pickArea.station_code && isValid(pickArea.station_code[0])) ? 1000000 : (pickArea.km[0] > 2 ? 450000 : 185000)) : 62000) * mapFactor"
+    }
+  ],
+  "transform": [
+    {
+      "filter": "datum.trans_group_en === 'Sales' && datum.property_sub_type_en === 'Flat' && datum.rooms_en === '2 B/R' && datum.reg_type_en === 'Existing Properties'"
+    },
+    {
+      "filter": "datum.instance_date >= '2024-01-01' && datum.instance_date <= '2026-08-31'"
+    },
+    {
+      "filter": "datum.meter_sale_price >= 1000 && datum.meter_sale_price <= 100000 && datum.actual_worth > 0 && datum.procedure_area >= 30 && datum.procedure_area <= 400 && isValid(datum.area_lat) && isValid(datum.area_lon)"
+    },
+    {
+      "lookup": "area_id",
+      "from": {
+        "data": {
+          "url": "https://raw.githubusercontent.com/taha24li/Duabi-Metro-stations---Part-3/refs/heads/main/area_metro.json"
+        },
+        "key": "area_id",
+        "fields": [
+          "km",
+          "station",
+          "station_now",
+          "station_code",
+          "station_lat",
+          "station_lon"
+        ]
+      }
+    },
+    {
+      "filter": "isValid(datum.km)"
+    },
+    {
+      "calculate": "datum.km < 1 ? 'Under 1' : datum.km < 2 ? '1 to <2' : datum.km < 5 ? '2 to <5' : '5+'",
+      "as": "band"
+    }
+  ],
+  "config": {
+    "axis": {
+      "labelFontSize": 13,
+      "titleFontSize": 14
+    },
+    "view": {
+      "stroke": null
+    }
+  },
+  "vconcat": [
+    {
+      "width": 820,
+      "height": 240,
+      "encoding": {
+        "x": {
+          "field": "budget",
+          "type": "ordinal",
+          "sort": [
+            "≤ 1M",
+            "≤ 1.5M",
+            "≤ 2M",
+            "≤ 3M",
+            "≤ 4M"
+          ],
+          "title": "Budget ceiling (AED)",
+          "axis": {
+            "labelAngle": 0
+          }
+        },
+        "y": {
+          "field": "band",
+          "type": "ordinal",
+          "sort": [
+            "Under 1",
+            "1 to <2",
+            "2 to <5",
+            "5+"
+          ],
+          "title": "Area centre → nearest station (km)"
+        },
+        "tooltip": [
+          {
+            "field": "band",
+            "type": "nominal",
+            "title": "Distance band (km)"
+          },
+          {
+            "field": "budget",
+            "type": "nominal",
+            "title": "Budget (AED)"
+          },
+          {
+            "field": "k",
+            "type": "quantitative",
+            "title": "Meeting size target"
+          },
+          {
+            "field": "n",
+            "type": "quantitative",
+            "title": "Within budget"
+          },
+          {
+            "field": "share",
+            "type": "quantitative",
+            "title": "Share meeting target",
+            "format": ".1%"
+          },
+          {
+            "field": "areas",
+            "type": "quantitative",
+            "title": "Distinct areas"
+          }
+        ]
+      },
+      "layer": [
+        {
+          "mark": {
+            "type": "rect",
+            "cursor": "pointer"
+          },
+          "params": [
+            {
+              "name": "scenario",
+              "select": {
+                "type": "point",
+                "fields": [
+                  "band",
+                  "budget",
+                  "ceiling"
+                ],
+                "toggle": false,
+                "clear": false
+              },
+              "value": [
+                {
+                  "band": "Under 1",
+                  "budget": "≤ 1.5M",
+                  "ceiling": 1500000
+                }
+              ]
+            }
+          ],
+          "encoding": {
+            "color": {
+              "field": "shareClass",
+              "type": "nominal",
+              "scale": {
+                "domain": [
+                  "Below 25%",
+                  "25–<50%",
+                  "50–<75%",
+                  "75–100%",
+                  "Fewer than 10 sales"
+                ],
+                "range": [
+                  "#e4f4ef",
+                  "#a7d9cc",
+                  "#68aaa0",
+                  "#134b4e",
+                  "#d5d7d9"
+                ]
+              },
+              "legend": {
+                "title": "Heatmap colour: share of sales meeting the size target",
+                "orient": "top",
+                "columns": 5,
+                "titleLimit": 300
+              }
+            },
+            "stroke": {
+              "condition": {
+                "param": "scenario",
+                "empty": false,
+                "value": "#132a39"
+              },
+              "value": "white"
+            },
+            "strokeWidth": {
+              "condition": {
+                "param": "scenario",
+                "empty": false,
+                "value": 4
+              },
+              "value": 1
+            }
+          },
+          "name": "heatTiles"
+        },
+        {
+          "mark": {
+            "type": "text",
+            "fontSize": 15,
+            "fontWeight": "bold",
+            "cursor": "pointer"
+          },
+          "encoding": {
+            "text": {
+              "field": "counts",
+              "type": "nominal"
+            },
+            "color": {
+              "condition": {
+                "test": "datum.n >= 10 && datum.share >= 0.75",
+                "value": "white"
+              },
+              "value": "#0b2226"
+            }
+          },
+          "name": "heatCounts"
+        },
+        {
+          "transform": [
+            {
+              "filter": "datum.n < 10"
+            }
+          ],
+          "mark": {
+            "type": "text",
+            "dy": 17,
+            "fontSize": 11,
+            "color": "#383d40"
+          },
+          "encoding": {
+            "text": {
+              "value": "Small sample"
+            }
+          },
+          "name": "heatSmall"
+        }
+      ],
+      "transform": [
+        {
+          "calculate": "datum.actual_worth <= 1000000",
+          "as": "le1M"
+        },
+        {
+          "calculate": "datum.actual_worth <= 1500000",
+          "as": "le1_5M"
+        },
+        {
+          "calculate": "datum.actual_worth <= 2000000",
+          "as": "le2M"
+        },
+        {
+          "calculate": "datum.actual_worth <= 3000000",
+          "as": "le3M"
+        },
+        {
+          "calculate": "datum.actual_worth <= 4000000",
+          "as": "le4M"
+        },
+        {
+          "fold": [
+            "le1M",
+            "le1_5M",
+            "le2M",
+            "le3M",
+            "le4M"
+          ],
+          "as": [
+            "budgetKey",
+            "withinBudget"
+          ]
+        },
+        {
+          "calculate": "datum.budgetKey === 'le1M' ? '≤ 1M' : datum.budgetKey === 'le1_5M' ? '≤ 1.5M' : datum.budgetKey === 'le2M' ? '≤ 2M' : datum.budgetKey === 'le3M' ? '≤ 3M' : '≤ 4M'",
+          "as": "budget"
+        },
+        {
+          "calculate": "datum.budgetKey === 'le1M' ? 1000000 : datum.budgetKey === 'le1_5M' ? 1500000 : datum.budgetKey === 'le2M' ? 2000000 : datum.budgetKey === 'le3M' ? 3000000 : 4000000",
+          "as": "ceiling"
+        },
+        {
+          "filter": "datum.withinBudget"
+        },
+        {
+          "calculate": "datum.procedure_area >= minSize ? 1 : 0",
+          "as": "meetsSize"
+        },
+        {
+          "aggregate": [
+            {
+              "op": "count",
+              "as": "n"
+            },
+            {
+              "op": "sum",
+              "field": "meetsSize",
+              "as": "k"
+            },
+            {
+              "op": "distinct",
+              "field": "area_id",
+              "as": "areas"
+            }
+          ],
+          "groupby": [
+            "band",
+            "budget",
+            "ceiling"
+          ]
+        },
+        {
+          "calculate": "datum.k / datum.n",
+          "as": "share"
+        },
+        {
+          "calculate": "datum.k + ' of ' + datum.n",
+          "as": "counts"
+        },
+        {
+          "calculate": "datum.n < 10 ? 'Fewer than 10 sales' : datum.share < 0.25 ? 'Below 25%' : datum.share < 0.5 ? '25–<50%' : datum.share < 0.75 ? '50–<75%' : '75–100%'",
+          "as": "shareClass"
+        }
+      ]
+    },
+    {
+      "hconcat": [
+        {
+          "width": 690,
+          "height": 500,
+          "title": {
+            "text": {
+              "expr": "(pickArea.area_lon && pickArea.band[0] === scenario.band[0] && pickArea.ceiling[0] === scenario.ceiling[0]) ? ((pickArea.station_code && isValid(pickArea.station_code[0])) ? (pickArea.km[0] <= 1 ? [((mapView === 'Nearest station' && (pickArea.station_code && isValid(pickArea.station_code[0]))) ? 'Around '+pickArea.station_now[0]+' station' : 'Around '+pickArea.area_name_en[0]), 'Venues: within 1 km of '+pickArea.station_now[0]+' station ('+format(pickArea.km[0],'.2f')+' km from this area).'] : pickArea.km[0] <= 2 ? [((mapView === 'Nearest station' && (pickArea.station_code && isValid(pickArea.station_code[0]))) ? 'Around '+pickArea.station_now[0]+' station' : 'Around '+pickArea.area_name_en[0]), 'Caution: station is '+format(pickArea.km[0],'.1f')+' km away; venues are around it.'] : [((mapView === 'Nearest station' && (pickArea.station_code && isValid(pickArea.station_code[0]))) ? 'Around '+pickArea.station_now[0]+' station' : 'Around '+pickArea.area_name_en[0]), 'Far from the metro: '+pickArea.station_now[0]+' is '+format(pickArea.km[0],'.1f')+' km away.', 'Venues shown (if any) are within 1.5 km of this area.']) : [((mapView === 'Nearest station' && (pickArea.station_code && isValid(pickArea.station_code[0]))) ? 'Around '+pickArea.station_now[0]+' station' : 'Around '+pickArea.area_name_en[0]), 'Selected area: '+pickArea.area_name_en[0]]) : (mapFactor > 1 ? 'Where did these flats sell? · Dubai' : 'Where did these flats sell? · Dubai metro corridor')"
+            },
+            "anchor": "start",
+            "subtitle": [
+              "Click a heatmap cell for a fresh map. Scroll to zoom, drag to pan, or click an area.",
+              "A sales circle also selects its station and venues. Choose Nearest station to explore them.",
+              "Click Back to Dubai to reset the map. Hollow circles = zero matching sales. Triangles = metro stations."
+            ],
+            "offset": 38
+          },
+          "projection": {
+            "type": "mercator",
+            "translate": {
+              "expr": "[mapWindow.mapU ? 345 + (0.5 - (mapWindow.mapU[0]+mapWindow.mapU[1])/2)*690/max(0.000001,span(mapWindow.mapU)) : 345, mapWindow.mapV ? 250 + (0.5 - (mapWindow.mapV[0]+mapWindow.mapV[1])/2)*500/max(0.000001,span(mapWindow.mapV)) : 250]"
+            },
+            "center": {
+              "expr": "((pickArea.area_lon && pickArea.band[0] === scenario.band[0] && pickArea.ceiling[0] === scenario.ceiling[0])) ? ((mapView === 'Nearest station' && pickArea.station_code && isValid(pickArea.station_code[0])) ? [pickArea.station_lon[0],pickArea.station_lat[0]] : [pickArea.area_lon[0],pickArea.area_lat[0]]) : [55.2, 25.1]"
+            },
+            "scale": {
+              "expr": "mapScale"
+            }
+          },
+          "layer": [
+            {
+              "name": "mapNavigation",
+              "data": {
+                "values": [
+                  {
+                    "mapU": 0,
+                    "mapV": 0
+                  }
+                ]
+              },
+              "params": [
+                {
+                  "name": "mapWindow",
+                  "select": {
+                    "type": "interval",
+                    "encodings": [
+                      "x",
+                      "y"
+                    ],
+                    "zoom": "@wheelSurface_marks:wheel!, @communityShapes_marks:wheel!, @metroPoints_marks:wheel!, @areaCircles_marks:wheel!, @localVenues_marks:wheel!, @areaVenues_marks:wheel!",
+                    "translate": "[pointerdown[event.button === 0 && item() && item().mark.name !== 'resetMap_marks' && item().mark.name !== 'backLabel_marks' && item().mark.name !== 'backButton_marks'], window:pointerup] > window:pointermove!",
+                    "clear": "@resetMap_marks:pointerdown!, @resetMap_marks:click, @backLabel_marks:pointerdown!, @backLabel_marks:click, @backButton_marks:pointerdown!, @backButton_marks:click, dblclick, @heatTiles_marks:click, @heatCounts_marks:click, @heatSmall_marks:click, [@areaCircles_marks:pointerdown, window:pointermove] > @areaCircles_marks:click"
+                  },
+                  "bind": "scales"
+                }
+              ],
+              "mark": {
+                "type": "rect",
+                "fill": "transparent",
+                "clip": true,
+                "x": 0,
+                "y": 0,
+                "opacity": 0
+              },
+              "encoding": {
+                "x": {
+                  "field": "mapU",
+                  "type": "quantitative",
+                  "axis": null,
+                  "scale": {
+                    "domain": [
+                      0,
+                      1
+                    ],
+                    "nice": false,
+                    "zero": false,
+                    "reverse": false
+                  }
+                },
+                "y": {
+                  "field": "mapV",
+                  "type": "quantitative",
+                  "axis": null,
+                  "scale": {
+                    "domain": [
+                      0,
+                      1
+                    ],
+                    "nice": false,
+                    "zero": false,
+                    "reverse": true
+                  }
+                },
+                "x2": {
+                  "value": 690
+                },
+                "y2": {
+                  "value": 500
+                }
+              }
+            },
+            {
+              "name": "wheelSurface",
+              "data": {
+                "values": [
+                  {}
+                ]
+              },
+              "mark": {
+                "type": "rect",
+                "fill": "transparent",
+                "cursor": "grab"
+              },
+              "encoding": {
+                "x": {
+                  "value": 0
+                },
+                "x2": {
+                  "value": 690
+                },
+                "y": {
+                  "value": 0
+                },
+                "y2": {
+                  "value": 500
+                }
+              }
+            },
+            {
+              "data": {
+                "url": "https://raw.githubusercontent.com/sharios/CS333/main/2026-27/Part%202/dubai.geojson",
+                "format": {
+                  "type": "json",
+                  "property": "features"
+                }
+              },
+              "mark": {
+                "type": "geoshape",
+                "stroke": "#c6cecf",
+                "strokeWidth": 0.6,
+                "clip": true,
+                "cursor": "grab"
+              },
+              "name": "communityShapes",
+              "transform": [
+                {
+                  "calculate": "datum.properties.Longitude",
+                  "as": "area_lon"
+                },
+                {
+                  "calculate": "datum.properties.Latitude",
+                  "as": "area_lat"
+                },
+                {
+                  "calculate": "datum.properties.CNAME_E",
+                  "as": "area_name_en"
+                },
+                {
+                  "calculate": "scenario.band[0]",
+                  "as": "band"
+                },
+                {
+                  "calculate": "scenario.ceiling[0]",
+                  "as": "ceiling"
+                },
+                {
+                  "calculate": "-1",
+                  "as": "area_id"
+                },
+                {
+                  "calculate": "null",
+                  "as": "station_code"
+                },
+                {
+                  "calculate": "null",
+                  "as": "station_lat"
+                },
+                {
+                  "calculate": "null",
+                  "as": "station_lon"
+                },
+                {
+                  "calculate": "null",
+                  "as": "station_now"
+                },
+                {
+                  "calculate": "null",
+                  "as": "km"
+                }
+              ],
+              "encoding": {
+                "tooltip": [
+                  {
+                    "field": "area_name_en",
+                    "type": "nominal",
+                    "title": "Municipality community"
+                  }
+                ],
+                "fill": {
+                  "condition": {
+                    "test": "(pickArea.area_lon && pickArea.band[0] === scenario.band[0] && pickArea.ceiling[0] === scenario.ceiling[0]) && pickArea.area_id[0] === -1 && datum.area_name_en === pickArea.area_name_en[0]",
+                    "value": "#deebe7"
+                  },
+                  "value": "#f2f4f4"
+                }
+              }
+            },
+            {
+              "data": {
+                "url": "https://raw.githubusercontent.com/taha24li/Duabi-Metro-stations---Part-3/refs/heads/main/stations.json"
+              },
+              "mark": {
+                "type": "point",
+                "filled": true,
+                "shape": "triangle-up",
+                "color": "#202c31",
+                "size": 48,
+                "clip": true
+              },
+              "encoding": {
+                "longitude": {
+                  "field": "LON_STATION",
+                  "type": "quantitative"
+                },
+                "latitude": {
+                  "field": "LAT_STATION",
+                  "type": "quantitative"
+                },
+                "tooltip": [
+                  {
+                    "field": "station_now",
+                    "type": "nominal",
+                    "title": "Metro station"
+                  },
+                  {
+                    "field": "STATION_NO",
+                    "type": "nominal",
+                    "title": "Station code"
+                  }
+                ]
+              },
+              "name": "metroPoints"
+            },
+            {
+              "name": "areaCircles",
+              "transform": [
+                {
+                  "filter": "datum.band === scenario.band[0] && datum.actual_worth <= scenario.ceiling[0]"
+                },
+                {
+                  "calculate": "datum.procedure_area >= minSize ? 1 : 0",
+                  "as": "meetsSize"
+                },
+                {
+                  "aggregate": [
+                    {
+                      "op": "count",
+                      "as": "n"
+                    },
+                    {
+                      "op": "sum",
+                      "field": "meetsSize",
+                      "as": "k"
+                    }
+                  ],
+                  "groupby": [
+                    "area_id",
+                    "area_name_en",
+                    "area_lon",
+                    "area_lat",
+                    "station_code",
+                    "station_lat",
+                    "station_lon",
+                    "station_now",
+                    "km",
+                    "band"
+                  ]
+                },
+                {
+                  "calculate": "scenario.ceiling[0]",
+                  "as": "ceiling"
+                },
+                {
+                  "calculate": "max(1,datum.k)",
+                  "as": "symbolCount"
+                }
+              ],
+              "params": [
+                {
+                  "name": "pickArea",
+                  "select": {
+                    "type": "point",
+                    "fields": [
+                      "area_id",
+                      "station_code",
+                      "station_lat",
+                      "station_lon",
+                      "station_now",
+                      "band",
+                      "ceiling",
+                      "area_lon",
+                      "area_lat",
+                      "area_name_en",
+                      "km"
+                    ],
+                    "on": "[@areaCircles_marks:pointerdown, window:pointermove] > @areaCircles_marks:click",
+                    "toggle": false,
+                    "clear": "@resetMap_marks:pointerdown!, @resetMap_marks:click, @backLabel_marks:pointerdown!, @backLabel_marks:click, @backButton_marks:pointerdown!, @backButton_marks:click, dblclick, @heatTiles_marks:click, @heatCounts_marks:click, @heatSmall_marks:click"
+                  }
+                }
+              ],
+              "mark": {
+                "type": "circle",
+                "strokeWidth": 2,
+                "cursor": "grab",
+                "clip": true
+              },
+              "encoding": {
+                "longitude": {
+                  "field": "area_lon",
+                  "type": "quantitative"
+                },
+                "latitude": {
+                  "field": "area_lat",
+                  "type": "quantitative"
+                },
+                "size": {
+                  "field": "symbolCount",
+                  "type": "quantitative",
+                  "scale": {
+                    "type": "linear",
+                    "domain": [
+                      0,
+                      100
+                    ],
+                    "range": [
+                      38,
+                      1050
+                    ],
+                    "clamp": true
+                  },
+                  "legend": {
+                    "title": "Matching sales",
+                    "values": [
+                      1,
+                      10,
+                      50,
+                      100
+                    ],
+                    "orient": "bottom",
+                    "direction": "horizontal"
+                  }
+                },
+                "fill": {
+                  "condition": {
+                    "test": "datum.k == 0",
+                    "value": "transparent"
+                  },
+                  "value": "#208779"
+                },
+                "fillOpacity": {
+                  "value": 0.58
+                },
+                "stroke": {
+                  "condition": [
+                    {
+                      "test": "pickArea.area_id && datum.area_id === pickArea.area_id[0] && pickArea.band[0] === scenario.band[0] && pickArea.ceiling[0] === scenario.ceiling[0]",
+                      "value": "#b6460f"
+                    },
+                    {
+                      "test": "datum.k == 0",
+                      "value": "#79858a"
+                    }
+                  ],
+                  "value": "#10534f"
+                },
+                "tooltip": [
+                  {
+                    "field": "area_name_en",
+                    "type": "nominal",
+                    "title": "DLD area"
+                  },
+                  {
+                    "field": "k",
+                    "type": "quantitative",
+                    "title": "Met both targets"
+                  },
+                  {
+                    "field": "n",
+                    "type": "quantitative",
+                    "title": "Within budget"
+                  },
+                  {
+                    "field": "station_now",
+                    "type": "nominal",
+                    "title": "Nearest station"
+                  },
+                  {
+                    "field": "km",
+                    "type": "quantitative",
+                    "title": "Area centre → station (km)",
+                    "format": ".3f"
+                  }
+                ]
+              }
+            },
+            {
+              "name": "distanceRing",
+              "data": {
+                "values": [
+                  {}
+                ]
+              },
+              "transform": [
+                {
+                  "filter": "(pickArea.area_lon && pickArea.band[0] === scenario.band[0] && pickArea.ceiling[0] === scenario.ceiling[0]) && isValid(pickArea.km[0]) && pickArea.station_code && isValid(pickArea.station_code[0])"
+                },
+                {
+                  "calculate": "pickArea.km[0] <= 2 ? pickArea.station_lon[0] : pickArea.area_lon[0]",
+                  "as": "lon"
+                },
+                {
+                  "calculate": "pickArea.km[0] <= 2 ? pickArea.station_lat[0] : pickArea.area_lat[0]",
+                  "as": "lat"
+                },
+                {
+                  "calculate": "pickArea.km[0] <= 2 ? '1 km from station' : '1.5 km from area'",
+                  "as": "lab"
+                }
+              ],
+              "mark": {
+                "type": "circle",
+                "filled": false,
+                "fill": null,
+                "stroke": "#b6460f",
+                "strokeWidth": 1.5,
+                "strokeDash": [
+                  6,
+                  4
+                ],
+                "clip": true,
+                "opacity": 0.9,
+                "size": {
+                  "expr": "PI*pow((pickArea.km[0] <= 2 ? 1 : 1.5)*(mapScale/6371*1.103),2)"
+                }
+              },
+              "encoding": {
+                "longitude": {
+                  "field": "lon",
+                  "type": "quantitative"
+                },
+                "latitude": {
+                  "field": "lat",
+                  "type": "quantitative"
+                }
+              }
+            },
+            {
+              "name": "distanceRingLabel",
+              "data": {
+                "values": [
+                  {}
+                ]
+              },
+              "transform": [
+                {
+                  "filter": "(pickArea.area_lon && pickArea.band[0] === scenario.band[0] && pickArea.ceiling[0] === scenario.ceiling[0]) && isValid(pickArea.km[0]) && pickArea.station_code && isValid(pickArea.station_code[0])"
+                },
+                {
+                  "calculate": "pickArea.km[0] <= 2 ? pickArea.station_lon[0] : pickArea.area_lon[0]",
+                  "as": "lon"
+                },
+                {
+                  "calculate": "pickArea.km[0] <= 2 ? pickArea.station_lat[0] : pickArea.area_lat[0]",
+                  "as": "lat"
+                },
+                {
+                  "calculate": "pickArea.km[0] <= 2 ? '1 km from station' : '1.5 km from area'",
+                  "as": "lab"
+                }
+              ],
+              "mark": {
+                "type": "text",
+                "fontSize": 11,
+                "fontWeight": "bold",
+                "color": "#b6460f",
+                "clip": true,
+                "baseline": "bottom",
+                "dy": {
+                  "expr": "-(pickArea.km[0] <= 2 ? 1 : 1.5)*(mapScale/6371*1.103)-3"
+                }
+              },
+              "encoding": {
+                "longitude": {
+                  "field": "lon",
+                  "type": "quantitative"
+                },
+                "latitude": {
+                  "field": "lat",
+                  "type": "quantitative"
+                },
+                "text": {
+                  "field": "lab",
+                  "type": "nominal"
+                }
+              }
+            },
+            {
+              "name": "localVenues",
+              "data": {
+                "url": "https://raw.githubusercontent.com/taha24li/Duabi-Metro-stations---Part-3/refs/heads/main/station_venues.json"
+              },
+              "transform": [
+                {
+                  "filter": "(pickArea.station_code && pickArea.band[0] === scenario.band[0] && pickArea.ceiling[0] === scenario.ceiling[0]) && pickArea.km[0] <= 2 && datum.station_code === pickArea.station_code[0] && (venueCat === \"All\" || datum.group === venueCat)"
+                }
+              ],
+              "mark": {
+                "type": "circle",
+                "size": 32,
+                "stroke": "white",
+                "strokeWidth": 0.7,
+                "clip": true
+              },
+              "encoding": {
+                "longitude": {
+                  "field": "lon",
+                  "type": "quantitative"
+                },
+                "latitude": {
+                  "field": "lat",
+                  "type": "quantitative"
+                },
+                "color": {
+                  "field": "group",
+                  "type": "nominal",
+                  "scale": {
+                    "domain": [
+                      "Cafés and coffee",
+                      "Restaurants",
+                      "Hotels",
+                      "Shops",
+                      "Beach and leisure",
+                      "Other"
+                    ],
+                    "range": [
+                      "#966212",
+                      "#b74448",
+                      "#6b56a4",
+                      "#2c69a3",
+                      "#39843f",
+                      "#667079"
+                    ]
+                  },
+                  "legend": {
+                    "title": "Recorded venues, circa 2020",
+                    "orient": "bottom",
+                    "columns": 3,
+                    "symbolType": "circle",
+                    "labelLimit": 140
+                  }
+                },
+                "tooltip": [
+                  {
+                    "field": "name",
+                    "type": "nominal",
+                    "title": "Recorded venue"
+                  },
+                  {
+                    "field": "category",
+                    "type": "nominal",
+                    "title": "Original category"
+                  },
+                  {
+                    "field": "group",
+                    "type": "nominal",
+                    "title": "Venue group"
+                  },
+                  {
+                    "field": "distance_km",
+                    "type": "quantitative",
+                    "title": "Station → venue (km)",
+                    "format": ".3f"
+                  }
+                ]
+              }
+            },
+            {
+              "name": "areaVenues",
+              "data": {
+                "url": "https://raw.githubusercontent.com/taha24li/Duabi-Metro-stations---Part-3/refs/heads/main/area_venues.json"
+              },
+              "transform": [
+                {
+                  "filter": "(pickArea.area_id && pickArea.band[0] === scenario.band[0] && pickArea.ceiling[0] === scenario.ceiling[0]) && pickArea.km[0] > 2 && datum.area_id === pickArea.area_id[0] && (venueCat === \"All\" || datum.group === venueCat)"
+                }
+              ],
+              "mark": {
+                "type": "circle",
+                "size": 32,
+                "stroke": "white",
+                "strokeWidth": 0.7,
+                "clip": true
+              },
+              "encoding": {
+                "longitude": {
+                  "field": "lon",
+                  "type": "quantitative"
+                },
+                "latitude": {
+                  "field": "lat",
+                  "type": "quantitative"
+                },
+                "color": {
+                  "field": "group",
+                  "type": "nominal",
+                  "scale": {
+                    "domain": [
+                      "Cafés and coffee",
+                      "Restaurants",
+                      "Hotels",
+                      "Shops",
+                      "Beach and leisure",
+                      "Other"
+                    ],
+                    "range": [
+                      "#966212",
+                      "#b74448",
+                      "#6b56a4",
+                      "#2c69a3",
+                      "#39843f",
+                      "#667079"
+                    ]
+                  }
+                },
+                "tooltip": [
+                  {
+                    "field": "name",
+                    "type": "nominal",
+                    "title": "Recorded venue"
+                  },
+                  {
+                    "field": "category",
+                    "type": "nominal",
+                    "title": "Original category"
+                  },
+                  {
+                    "field": "group",
+                    "type": "nominal",
+                    "title": "Venue group"
+                  },
+                  {
+                    "field": "distance_km",
+                    "type": "quantitative",
+                    "title": "Area centre → venue (km)",
+                    "format": ".3f"
+                  }
+                ]
+              }
+            },
+            {
+              "name": "backButton",
+              "data": {
+                "values": [
+                  {}
+                ]
+              },
+              "mark": {
+                "type": "rect",
+                "cornerRadius": 4,
+                "fill": "#ffffff",
+                "stroke": "#24554e",
+                "cursor": "pointer"
+              },
+              "encoding": {
+                "x": {
+                  "value": 9
+                },
+                "x2": {
+                  "value": 150
+                },
+                "y": {
+                  "value": 9
+                },
+                "y2": {
+                  "value": 38
+                },
+                "tooltip": {
+                  "value": "Back to the metro corridor map"
+                }
+              }
+            },
+            {
+              "name": "backLabel",
+              "data": {
+                "values": [
+                  {}
+                ]
+              },
+              "mark": {
+                "type": "text",
+                "fontWeight": "bold",
+                "fontSize": 13,
+                "color": "#16443d",
+                "cursor": "pointer"
+              },
+              "encoding": {
+                "x": {
+                  "value": 79
+                },
+                "y": {
+                  "value": 24
+                },
+                "text": {
+                  "value": "← Back to Dubai"
+                },
+                "tooltip": {
+                  "value": "Back to the metro corridor map"
+                }
+              }
+            },
+            {
+              "name": "resetMap",
+              "data": {
+                "values": [
+                  {}
+                ]
+              },
+              "mark": {
+                "type": "rect",
+                "fill": "transparent",
+                "cursor": "pointer"
+              },
+              "encoding": {
+                "x": {
+                  "value": 9
+                },
+                "x2": {
+                  "value": 150
+                },
+                "y": {
+                  "value": 9
+                },
+                "y2": {
+                  "value": 38
+                },
+                "tooltip": {
+                  "value": "Back to the metro corridor map"
+                }
+              }
+            }
+          ]
+        },
+        {
+          "width": 340,
+          "height": {
+            "step": 22
+          },
+          "title": {
+            "text": {
+              "expr": "'Floor space · '+scenario.band[0]+' km · '+scenario.budget[0]+' AED'"
+            },
+            "anchor": "start",
+            "subtitle": [
+              "Dot = median · Bar = middle 50% · (n) = sampled sales",
+              "Dashed line = size target · Faded dots = fewer than 5 sales",
+              "Top 12 by sales, plus your selected area. Tick “Show every area” for all."
+            ],
+            "offset": 16
+          },
+          "transform": [
+            {
+              "filter": "datum.band === scenario.band[0] && datum.actual_worth <= scenario.ceiling[0]"
+            },
+            {
+              "calculate": "datum.procedure_area >= minSize ? 1 : 0",
+              "as": "meetsSize"
+            },
+            {
+              "aggregate": [
+                {
+                  "op": "q1",
+                  "field": "procedure_area",
+                  "as": "q1"
+                },
+                {
+                  "op": "median",
+                  "field": "procedure_area",
+                  "as": "medianSize"
+                },
+                {
+                  "op": "q3",
+                  "field": "procedure_area",
+                  "as": "q3"
+                },
+                {
+                  "op": "count",
+                  "as": "n"
+                },
+                {
+                  "op": "sum",
+                  "field": "meetsSize",
+                  "as": "k"
+                }
+              ],
+              "groupby": [
+                "area_id",
+                "area_name_en"
+              ]
+            },
+            {
+              "calculate": "datum.area_name_en + ' (' + datum.n + ')'",
+              "as": "areaLabel"
+            },
+            {
+              "window": [
+                {
+                  "op": "row_number",
+                  "as": "rank"
+                }
+              ],
+              "sort": [
+                {
+                  "field": "n",
+                  "order": "descending"
+                },
+                {
+                  "field": "area_name_en",
+                  "order": "ascending"
+                },
+                {
+                  "field": "area_id",
+                  "order": "ascending"
+                }
+              ]
+            },
+            {
+              "filter": "allAreas || datum.rank <= 12 || (pickArea.area_id && datum.area_id === pickArea.area_id[0] && pickArea.band[0] === scenario.band[0] && pickArea.ceiling[0] === scenario.ceiling[0])"
+            }
+          ],
+          "layer": [
+            {
+              "mark": {
+                "type": "rule",
+                "strokeWidth": 6,
+                "opacity": 1
+              },
+              "encoding": {
+                "y": {
+                  "field": "areaLabel",
+                  "type": "nominal",
+                  "sort": {
+                    "field": "medianSize",
+                    "op": "max",
+                    "order": "descending"
+                  },
+                  "title": null,
+                  "axis": {
+                    "labelLimit": 450
+                  }
+                },
+                "x": {
+                  "field": "q1",
+                  "type": "quantitative",
+                  "title": "Floor area (m²)",
+                  "scale": {
+                    "zero": true
+                  }
+                },
+                "x2": {
+                  "field": "q3"
+                },
+                "tooltip": [
+                  {
+                    "field": "area_name_en",
+                    "type": "nominal",
+                    "title": "DLD area"
+                  },
+                  {
+                    "field": "n",
+                    "type": "quantitative",
+                    "title": "Within budget",
+                    "format": ",d"
+                  },
+                  {
+                    "field": "k",
+                    "type": "quantitative",
+                    "title": "Also met target",
+                    "format": ",d"
+                  },
+                  {
+                    "field": "q1",
+                    "type": "quantitative",
+                    "title": "25th percentile (m²)",
+                    "format": ".1f"
+                  },
+                  {
+                    "field": "medianSize",
+                    "type": "quantitative",
+                    "title": "Median size (m²)",
+                    "format": ".1f"
+                  },
+                  {
+                    "field": "q3",
+                    "type": "quantitative",
+                    "title": "75th percentile (m²)",
+                    "format": ".1f"
+                  }
+                ],
+                "opacity": {
+                  "condition": {
+                    "test": "datum.n < 5",
+                    "value": 0.3
+                  },
+                  "value": 1
+                },
+                "color": {
+                  "condition": {
+                    "test": "pickArea.area_id && datum.area_id === pickArea.area_id[0] && pickArea.band[0] === scenario.band[0] && pickArea.ceiling[0] === scenario.ceiling[0]",
+                    "value": "#ba551e"
+                  },
+                  "value": "#87bfb5"
+                }
+              }
+            },
+            {
+              "transform": [
+                {
+                  "aggregate": [
+                    {
+                      "op": "count",
+                      "as": "rows"
+                    }
+                  ]
+                },
+                {
+                  "calculate": "minSize",
+                  "as": "target"
+                }
+              ],
+              "mark": {
+                "type": "rule",
+                "strokeDash": [
+                  5,
+                  4
+                ],
+                "color": "#ac591e"
+              },
+              "encoding": {
+                "x": {
+                  "field": "target",
+                  "type": "quantitative",
+                  "title": "Floor area (m²)",
+                  "scale": {
+                    "zero": true
+                  }
+                }
+              }
+            },
+            {
+              "transform": [
+                {
+                  "aggregate": [
+                    {
+                      "op": "count",
+                      "as": "rows"
+                    }
+                  ]
+                },
+                {
+                  "calculate": "minSize",
+                  "as": "target"
+                },
+                {
+                  "calculate": "'Target ' + minSize + ' m²'",
+                  "as": "targetLabel"
+                }
+              ],
+              "mark": {
+                "type": "text",
+                "align": "left",
+                "baseline": "bottom",
+                "dx": 5,
+                "dy": -3,
+                "fontSize": 12,
+                "fontWeight": "bold",
+                "color": "#ac591e"
+              },
+              "encoding": {
+                "x": {
+                  "field": "target",
+                  "type": "quantitative"
+                },
+                "y": {
+                  "value": 0
+                },
+                "text": {
+                  "field": "targetLabel",
+                  "type": "nominal"
+                }
+              }
+            },
+            {
+              "mark": {
+                "type": "point",
+                "filled": true,
+                "size": 85
+              },
+              "encoding": {
+                "x": {
+                  "field": "medianSize",
+                  "type": "quantitative",
+                  "title": "Floor area (m²)",
+                  "scale": {
+                    "zero": true
+                  }
+                },
+                "y": {
+                  "field": "areaLabel",
+                  "type": "nominal",
+                  "sort": {
+                    "field": "medianSize",
+                    "op": "max",
+                    "order": "descending"
+                  },
+                  "title": null,
+                  "axis": {
+                    "labelLimit": 450
+                  }
+                },
+                "tooltip": [
+                  {
+                    "field": "area_name_en",
+                    "type": "nominal",
+                    "title": "DLD area"
+                  },
+                  {
+                    "field": "n",
+                    "type": "quantitative",
+                    "title": "Within budget",
+                    "format": ",d"
+                  },
+                  {
+                    "field": "k",
+                    "type": "quantitative",
+                    "title": "Also met target",
+                    "format": ",d"
+                  },
+                  {
+                    "field": "q1",
+                    "type": "quantitative",
+                    "title": "25th percentile (m²)",
+                    "format": ".1f"
+                  },
+                  {
+                    "field": "medianSize",
+                    "type": "quantitative",
+                    "title": "Median size (m²)",
+                    "format": ".1f"
+                  },
+                  {
+                    "field": "q3",
+                    "type": "quantitative",
+                    "title": "75th percentile (m²)",
+                    "format": ".1f"
+                  }
+                ],
+                "opacity": {
+                  "condition": {
+                    "test": "datum.n < 5",
+                    "value": 0.35
+                  },
+                  "value": 1
+                },
+                "color": {
+                  "condition": {
+                    "test": "pickArea.area_id && datum.area_id === pickArea.area_id[0] && pickArea.band[0] === scenario.band[0] && pickArea.ceiling[0] === scenario.ceiling[0]",
+                    "value": "#ba551e"
+                  },
+                  "value": "#134b4e"
+                }
+              }
+            }
+          ]
+        }
+      ],
+      "spacing": 24
+    },
+    {
+      "width": 820,
+      "height": 340,
+      "title": {
+        "text": {
+          "expr": "'Individual sales · '+scenario.band[0]+' km · '+scenario.budget[0]+' AED'"
+        },
+        "anchor": "start",
+        "subtitle": [
+          "Dark dot = meets the size target · light dot = below it · orange = the area you clicked on the map.",
+          "Dots left of the dashed line are too small. Dots near the top are at your budget ceiling."
+        ],
+        "offset": 10
+      },
+      "transform": [
+        {
+          "filter": "datum.band === scenario.band[0] && datum.actual_worth <= scenario.ceiling[0]"
+        },
+        {
+          "calculate": "datum.actual_worth/1000000",
+          "as": "priceM"
+        },
+        {
+          "calculate": "(pickArea.area_id && datum.area_id === pickArea.area_id[0] && pickArea.band[0] === scenario.band[0] && pickArea.ceiling[0] === scenario.ceiling[0]) ? 1 : 0",
+          "as": "sel"
+        },
+        {
+          "calculate": "datum.sel === 1 ? 'Selected area' : datum.procedure_area >= minSize ? 'Meets size target' : 'Below size target'",
+          "as": "cls"
+        }
+      ],
+      "layer": [
+        {
+          "name": "salesDots",
+          "mark": {
+            "type": "point",
+            "filled": true,
+            "stroke": "white",
+            "strokeWidth": 0.5,
+            "cursor": "default"
+          },
+          "encoding": {
+            "x": {
+              "field": "procedure_area",
+              "type": "quantitative",
+              "title": "Floor area (m²)",
+              "scale": {
+                "zero": true,
+                "nice": true
+              },
+              "axis": {
+                "tickMinStep": 20
+              }
+            },
+            "y": {
+              "field": "priceM",
+              "type": "quantitative",
+              "title": "Sale price (AED million)",
+              "scale": {
+                "zero": true,
+                "domain": [
+                  0,
+                  {
+                    "expr": "scenario.ceiling[0]/1000000*1.08"
+                  }
+                ],
+                "nice": false
+              },
+              "axis": {
+                "format": ".1f"
+              }
+            },
+            "color": {
+              "field": "cls",
+              "type": "nominal",
+              "scale": {
+                "domain": [
+                  "Selected area",
+                  "Meets size target",
+                  "Below size target"
+                ],
+                "range": [
+                  "#ba551e",
+                  "#134b4e",
+                  "#a7d9cc"
+                ]
+              },
+              "legend": {
+                "title": "Each dot is one sale",
+                "orient": "top",
+                "columns": 3,
+                "titleLimit": 300
+              }
+            },
+            "size": {
+              "condition": {
+                "test": "datum.sel === 1",
+                "value": 90
+              },
+              "value": 45
+            },
+            "opacity": {
+              "condition": {
+                "test": "datum.sel === 1",
+                "value": 1
+              },
+              "value": 0.6
+            },
+            "order": {
+              "field": "sel",
+              "type": "quantitative"
+            },
+            "tooltip": [
+              {
+                "field": "area_name_en",
+                "type": "nominal",
+                "title": "DLD area"
+              },
+              {
+                "field": "actual_worth",
+                "type": "quantitative",
+                "title": "Price (AED)",
+                "format": ",.0f"
+              },
+              {
+                "field": "procedure_area",
+                "type": "quantitative",
+                "title": "Floor area (m²)",
+                "format": ".1f"
+              },
+              {
+                "field": "meter_sale_price",
+                "type": "quantitative",
+                "title": "Price per m² (AED)",
+                "format": ",.0f"
+              },
+              {
+                "field": "instance_date",
+                "type": "nominal",
+                "title": "Sale date"
+              }
+            ]
+          }
+        },
+        {
+          "transform": [
+            {
+              "aggregate": [
+                {
+                  "op": "count",
+                  "as": "rows"
+                }
+              ]
+            },
+            {
+              "calculate": "minSize",
+              "as": "target"
+            }
+          ],
+          "mark": {
+            "type": "rule",
+            "strokeDash": [
+              5,
+              4
+            ],
+            "color": "#ac591e",
+            "strokeWidth": 1.5
+          },
+          "encoding": {
+            "x": {
+              "field": "target",
+              "type": "quantitative"
+            }
+          }
+        },
+        {
+          "transform": [
+            {
+              "aggregate": [
+                {
+                  "op": "count",
+                  "as": "rows"
+                }
+              ]
+            },
+            {
+              "calculate": "minSize",
+              "as": "target"
+            },
+            {
+              "calculate": "'Size target '+minSize+' m²'",
+              "as": "lab"
+            }
+          ],
+          "mark": {
+            "type": "text",
+            "align": "left",
+            "baseline": "bottom",
+            "dx": 5,
+            "dy": -3,
+            "fontSize": 12,
+            "fontWeight": "bold",
+            "color": "#ac591e",
+            "y": 0
+          },
+          "encoding": {
+            "x": {
+              "field": "target",
+              "type": "quantitative"
+            },
+            "y": {
+              "value": 0
+            },
+            "text": {
+              "field": "lab",
+              "type": "nominal"
+            }
+          }
+        },
+        {
+          "transform": [
+            {
+              "aggregate": [
+                {
+                  "op": "count",
+                  "as": "rows"
+                }
+              ]
+            },
+            {
+              "calculate": "scenario.ceiling[0]/1000000",
+              "as": "ceilM"
+            }
+          ],
+          "mark": {
+            "type": "rule",
+            "strokeDash": [
+              2,
+              3
+            ],
+            "color": "#132a39",
+            "strokeWidth": 1.5
+          },
+          "encoding": {
+            "y": {
+              "field": "ceilM",
+              "type": "quantitative"
+            }
+          }
+        },
+        {
+          "transform": [
+            {
+              "aggregate": [
+                {
+                  "op": "count",
+                  "as": "rows"
+                }
+              ]
+            },
+            {
+              "calculate": "scenario.ceiling[0]/1000000",
+              "as": "ceilM"
+            },
+            {
+              "calculate": "'Budget ceiling '+scenario.budget[0]+' AED'",
+              "as": "lab"
+            }
+          ],
+          "mark": {
+            "type": "text",
+            "align": "right",
+            "baseline": "bottom",
+            "dx": -4,
+            "dy": -3,
+            "fontSize": 12,
+            "fontWeight": "bold",
+            "color": "#132a39"
+          },
+          "encoding": {
+            "y": {
+              "field": "ceilM",
+              "type": "quantitative"
+            },
+            "x": {
+              "value": 820
+            },
+            "text": {
+              "field": "lab",
+              "type": "nominal"
+            }
+          }
+        }
+      ]
+    }
+  ],
+  "spacing": 64,
+  "resolve": {
+    "scale": {
+      "x": "independent",
+      "y": "independent",
+      "color": "independent",
+      "size": "independent"
+    }
+  },
+  "padding": {
+    "left": 12,
+    "right": 18,
+    "top": 8,
+    "bottom": 8
+  },
+  "autosize": {
+    "type": "pad",
+    "resize": true
+  }
+};
+
+// Embedding: the Vega-Lite specification above is passed to the vega-embed library, which compiles it
+// to Vega and draws it into the <div id="vis"> element (the standard method of the Vega-Lite documentation).
+// The "..." menu on the chart opens "View Source" (this specification) and "Open in Vega Editor".
+// patch: only tells Vega in which element each widget is shown (the specification itself is unchanged).
+var widgetBoxes = { minSize: "#ctl-size", allAreas: "#ctl-all", venueCat: "#ctl-venue-slot", mapView: "#ctl-mapview" };
+vegaEmbed("#vis", spec, { patch: function (vgSpec) {
+    (vgSpec.signals || []).forEach(function (s) { if (s.bind && widgetBoxes[s.name]) s.bind.element = widgetBoxes[s.name]; });
+    return vgSpec; }, actions: { source: true, compiled: false, editor: true, export: true } }).then(function (result) {
+  var view = result.view, vis = document.getElementById("vis");
+  // Place each control under the view it belongs to. Positions are read from the chart's own scene graph,
+  // so this works with the default (canvas) renderer.
+  function walk(group, ox, oy, out) {
+    (group.items || []).forEach(function (mark) {
+      (mark.items || []).forEach(function (it) {
+        var b = it.bounds; if (!b) return;
+        var rec = { mark: mark, item: it, x1: b.x1 + ox, y1: b.y1 + oy, x2: b.x2 + ox, y2: b.y2 + oy };
+        out.push(rec);
+        if (mark.marktype === "group") walk(it, ox + (it.x || 0), oy + (it.y || 0), out);
+      });
+    });
+    return out;
+  }
+  function named(all, name) { return all.filter(function (r) { return r.mark.name === name; }); }
+  function union(rs) { if (!rs.length) return null; return rs.reduce(function (a, r) { return { x1: Math.min(a.x1, r.x1), y1: Math.min(a.y1, r.y1), x2: Math.max(a.x2, r.x2), y2: Math.max(a.y2, r.y2) }; }, { x1: 1e9, y1: 1e9, x2: -1e9, y2: -1e9 }); }
+  function put(id, x, y) { var e = document.getElementById(id), o = document.getElementById("wrap").getBoundingClientRect(),
+      c = vis.querySelector("canvas").getBoundingClientRect(), org = view.origin();
+    e.style.left = (c.left - o.left + org[0] + spec.padding.left + x) + "px"; e.style.top = (c.top - o.top + org[1] + spec.padding.top + y) + "px"; }
+  function place() {
+    var root = view.scenegraph().root.items[0], all = walk(root, 0, 0, []);
+    var tiles = union(named(all, "heatTiles_marks")), map = union(named(all, "wheelSurface_marks"));
+    if (!tiles || !map) return;
+    var axisTitle = all.filter(function (r) { return r.mark.role === "axis-title" && r.item.text === "Budget ceiling (AED)"; })[0];
+    var mapBottom = map.y2;
+    all.filter(function (r) { return r.mark.role === "legend"; }).forEach(function (r) {
+      if (r.x1 < map.x2 && r.y1 >= map.y2 - 5 && r.y1 < map.y2 + 150 && r.y2 > mapBottom) mapBottom = r.y2; });
+    var v3x = all.filter(function (r) { return r.mark.role === "axis-title" && r.item.text === "Floor area (m²)" && r.x1 > map.x2 && r.y1 < mapBottom; })
+                 .sort(function (a, b) { return a.y1 - b.y1; })[0];
+    if (axisTitle) put("ctl-size", tiles.x1, axisTitle.y2 + 8);
+    put("ctl-venue", map.x1, mapBottom + 8);
+    if (v3x) put("ctl-all", v3x.x1 - 150, v3x.y2 + 10);
+  }
+  function relayout() { view.resize().runAsync().then(function () { setTimeout(place, 60); }); }
+  view.addSignalListener("scenario", relayout);
+  view.addSignalListener("pickArea", relayout);
+  view.addSignalListener("allAreas", relayout);
+  view.addSignalListener("mapView", function () { setTimeout(place, 150); });
+  window.addEventListener("resize", place);
+  relayout(); setTimeout(place, 800);
+});
+</script>
+</body>
+</html>
